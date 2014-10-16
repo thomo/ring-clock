@@ -6,9 +6,9 @@
 
 #define FADE_BY(x) x*256/100 
 
-#define FADE_HOUR2 230
-#define FADE_HOUR1 160
-#define FADE_MIN 160
+#define FADE_HOUR2 FADE_BY(90)
+#define FADE_HOUR1 FADE_BY(75)
+#define FADE_MIN   FADE_BY(75)
 
 #define LED_DATA_PIN 3
 
@@ -152,17 +152,18 @@ void setMinLeds(int ledM) {
 
 void setSecLeds(int ledS, int prop) {
   CRGB tmp;
+  int iprop = 255-prop;
   
   int idx = ledS - 1;
   if (idx < 0) idx += NUM_LEDS;
   
   tmp = cfg.sec;
-  leds[idx] = tmp.fadeLightBy(prop) + leds[idx].fadeToBlackBy(180);
+  leds[idx] = tmp.fadeLightBy(prop) + leds[idx].fadeToBlackBy(iprop);
 
   ++idx;
   idx = idx == NUM_LEDS ? idx = 0 : idx;
   
   tmp = cfg.sec;
-  leds[idx] = tmp.fadeLightBy(255-prop) + leds[idx].fadeToBlackBy(180);
+  leds[idx] = tmp.fadeLightBy(iprop) + leds[idx].fadeToBlackBy(prop);
 }
 
