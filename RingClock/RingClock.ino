@@ -13,6 +13,9 @@
 // Timer Interrupt
 #include <TimerOne.h>
 
+// read atomic time broadcast
+#include <DCF77.h>
+
 #define NUM_LEDS 60
 #define LED_BRIGHTNESS 150
 
@@ -26,6 +29,9 @@
 
 #define T_SENSOR_PIN 2
 #define RING_DATA_PIN 3
+
+#define DCF_PIN 4
+#define DCF_INTERRUPT 0
 
 #define LED_CLOCK_PIN 5
 
@@ -63,10 +69,13 @@ byte digit[10] = {
 
 OneWire oneWire(T_SENSOR_PIN);
 DallasTemperature sensors(&oneWire);
+DCF77 DCF(DCF_PIN, DCF_INTERRUPT, true); 
+
 
 typedef struct {
   CRGB background;
   CRGB dots;
+  CRGB dotsQuarter;
   CRGB hour[3];
   CRGB min[2];
   CRGB sec;
@@ -84,7 +93,10 @@ volatile unsigned long curMillis = 0;
 
 int lastDisplayAtSec = -1;
 
+// === SETUP =========================================================================================================================
 void setup() {
+  DCF.Start();
+  
   setSyncProvider(RTC.get);   // the function to get the time from the RTC
   
   LEDS.addLeds<NEOPIXEL, RING_DATA_PIN, GRB>(leds, NUM_LEDS);
@@ -99,12 +111,13 @@ void setup() {
   pinMode(LED_DATE_OUT_PIN, OUTPUT);
 
   sensors.begin();  // DS18B20 starten
+  sensors.setWaitForConversion(false);
   
   testLEDStrip();
   
   initColorProfile();
   
-  Timer1.initialize(25000);
+  Timer1.initialize(10 * 1000); // run every 0.01 sec
   Timer1.attachInterrupt(ISR_displayClock); 
 
   ledData[3] = DIGIT_MINUS;
@@ -137,7 +150,10 @@ void testLEDStrip() {
 
 void initColorProfile() {
   cfg.background = CRGB( 0, 0, 0);
-  cfg.dots = CRGB(70,70,70);
+  cfg.dots = CRGB::DarkGray;
+  cfg.dots.fadeToBlackBy(192);
+  cfg.dotsQuarter = CRGB::DarkCyan;
+  cfg.dotsQuarter.fadeToBlackBy(192);
   
   cfg.hour[0] = CRGB::Blue;
   cfg.hour[1] = cfg.hour[0];
@@ -149,9 +165,10 @@ void initColorProfile() {
   cfg.min[1]  = cfg.min[0];
   cfg.min[1].fadeLightBy(FADE_MIN);;
   
-  cfg.sec  = CRGB::IndianRed;
+  cfg.sec  = CRGB::Red;
 }
 
+// === ISR ======================================================================================================================
 void ISR_displayClock(void) {
   int isr_curMSec = 0;
   
@@ -161,11 +178,9 @@ void ISR_displayClock(void) {
   } else {
     isr_curMSec = curMillis - isr_milliSecOffset;
   }
-  
-  displayClock(curHour, curMin, curSec, isr_curMSec);
-}  
 
-void displayClock(int hour, int min, int sec, int msec) {
+  // display clock
+  
   // 1. set background
   for(int i = 0; i < NUM_LEDS; ++i) {
     leds[i] = cfg.background; 
@@ -174,14 +189,17 @@ void displayClock(int hour, int min, int sec, int msec) {
   // 2. set dots
   for(int i = 0; i < NUM_LEDS; i += 5) {
     leds[i] = cfg.dots;
+    if ((i % 15) == 0) {
+      leds[i] = cfg.dotsQuarter;
+    }
   }  
   
-  int ledH = hour * 5 + (min / 12); 
+  int ledH = curHour * 5 + (curMin / 12); 
   ledH = ledH > 55 ? ledH - 60 : ledH;
   
   setHourLeds(ledH);
-  setMinLeds(min);  
-  setSecLeds(sec, msec);
+  setMinLeds(curMin);  
+  setSecLeds(curSec, isr_curMSec);
   
   LEDS.setBrightness(readBrightness());
   LEDS.show();
@@ -232,21 +250,16 @@ void setMinLeds(int ledM) {
 }
 
 void setSecLeds(int ledS, int msec) {
-  CRGB tmp;
   int prop = (msec / 4);
   int iprop = 255 - prop;
-  
-  int idx = ledS - 1;
-  if (idx < 0) idx += NUM_LEDS;
-  
-  tmp = cfg.sec;
-  leds[idx] = tmp.fadeLightBy(prop) + leds[idx].fadeToBlackBy(iprop);
 
-  ++idx;
-  idx = idx == NUM_LEDS ? idx = 0 : idx;
-  
-  tmp = cfg.sec;
-  leds[idx] = tmp.fadeLightBy(iprop) + leds[idx].fadeToBlackBy(prop);
+  setSecLed((ledS == 0) ? NUM_LEDS - 1 : ledS - 1, prop, iprop);
+  setSecLed(ledS, iprop, prop);
+}
+
+void setSecLed(int idx, int prop, int iprop) {
+  CRGB tmp = cfg.sec;
+  leds[idx] = tmp.fadeLightBy(prop) + leds[idx].fadeToBlackBy(iprop);
 }
 
 int readBrightness() {
@@ -258,13 +271,21 @@ int readBrightness() {
   return sensorValue / 4; // adjust range 0..1024 -> 0..256
 }
 
+// === LOOP =========================================================================================================================
 void loop() {
+  time_t DCFtime = DCF.getTime(); // Check if new DCF77 time is available
+  if (DCFtime!=0)
+  {
+    Serial.println("Time is updated");
+    setTime(DCFtime);
+  }     
+  
   curHour = hour();
   curMin = minute();
   curSec = second();
   curMillis = millis();
 
-  if (curSec != lastDisplayAtSec) {
+  if (curSec != lastDisplayAtSec && ((curSec % 1) == 0)) {
     lastDisplayAtSec = curSec;
     
     prepareTemperatureDisplay();
@@ -295,8 +316,7 @@ void displayDate() {
 }
 
 void prepareTemperatureDisplay() {
-  sensors.requestTemperatures();                 // Temperatursensor auslesen
-  float temp = sensors.getTempCByIndex(0);       // Temperatur ausgeben
+  float temp = sensors.getTempCByIndex(0);       // get temperature
   int data = (int)(temp * 10 + .5);
   
   int dig;
@@ -318,6 +338,8 @@ void prepareTemperatureDisplay() {
     ledData[1] = digit[data % 100 % 10];
   }
   ledData[0] = DIGIT_GRAD;
+
+  sensors.requestTemperatures();                 // request next measurement
 }
 
 void displayTemperature() {
