@@ -33,13 +33,11 @@
 #define DCF_PIN 4
 #define DCF_INTERRUPT 0
 
-#define LED_CLOCK_PIN 5
+#define LED_OUT_PIN 6
+#define LED_CLOCK_PIN 7
+#define LED_DATE_LATCH_PIN 8
+#define LED_TEMP_LATCH_PIN 9
 
-#define LED_TEMP_OUT_PIN 6
-#define LED_TEMP_LATCH_PIN 7
-
-#define LED_DATE_OUT_PIN 8
-#define LED_DATE_LATCH_PIN 9
 
 CRGB leds[NUM_LEDS];
 byte ledData[4];
@@ -105,10 +103,9 @@ void setup() {
   pinMode(LDR_PIN, INPUT);
 
   pinMode(LED_CLOCK_PIN, OUTPUT);
+  pinMode(LED_OUT_PIN, OUTPUT);
   pinMode(LED_TEMP_LATCH_PIN, OUTPUT);
-  pinMode(LED_TEMP_OUT_PIN, OUTPUT);
   pinMode(LED_DATE_LATCH_PIN, OUTPUT);
-  pinMode(LED_DATE_OUT_PIN, OUTPUT);
 
   sensors.begin();  // DS18B20 starten
   sensors.setWaitForConversion(false);
@@ -263,12 +260,14 @@ void setSecLed(int idx, int prop, int iprop) {
 }
 
 int readBrightness() {
-  ldrValue[ldrIdx] = analogRead(LDR_PIN);
+  ldrValue[ldrIdx] = abs(analogRead(LDR_PIN) - 1024) + 15;
+  if (ldrValue[ldrIdx] > 512) ldrValue[ldrIdx] = 512;
+  
   ldrIdx = (ldrIdx == 3) ? 0 : ldrIdx + 1;
   
   int sensorValue = (ldrValue[0] + ldrValue[1] + ldrValue[2] + ldrValue[3]) / 4; // average value 
   
-  return sensorValue / 4; // adjust range 0..1024 -> 0..256
+  return sensorValue / 2; // adjust range 0..512 -> 0..256
 }
 
 // === LOOP =========================================================================================================================
@@ -276,7 +275,6 @@ void loop() {
   time_t DCFtime = DCF.getTime(); // Check if new DCF77 time is available
   if (DCFtime!=0)
   {
-    Serial.println("Time is updated");
     setTime(DCFtime);
   }     
   
@@ -308,10 +306,10 @@ void prepareDateDisplay() {
 
 void displayDate() {
   digitalWrite(LED_DATE_LATCH_PIN, 0);
-  shiftOut(LED_DATE_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[3]); 
-  shiftOut(LED_DATE_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[2]); 
-  shiftOut(LED_DATE_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[1]); 
-  shiftOut(LED_DATE_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[0]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[3]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[2]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[1]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[0]); 
   digitalWrite(LED_DATE_LATCH_PIN, 1);
 }
 
@@ -344,10 +342,10 @@ void prepareTemperatureDisplay() {
 
 void displayTemperature() {
   digitalWrite(LED_TEMP_LATCH_PIN, 0);
-  shiftOut(LED_TEMP_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[3]); 
-  shiftOut(LED_TEMP_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[2]); 
-  shiftOut(LED_TEMP_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[1]); 
-  shiftOut(LED_TEMP_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[0]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[3]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[2]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[1]); 
+  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[0]); 
   digitalWrite(LED_TEMP_LATCH_PIN, 1);
 }
 
