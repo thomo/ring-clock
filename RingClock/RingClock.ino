@@ -27,17 +27,18 @@
 
 #define LDR_PIN A0
 
-#define T_SENSOR_PIN 2
-#define RING_DATA_PIN 3
-
-#define DCF_PIN 4
+#define DCF_PIN 2
 #define DCF_INTERRUPT 0
+
+#define RING_DATA_PIN 3
+#define T_SENSOR_PIN 4
 
 #define LED_OUT_PIN 6
 #define LED_CLOCK_PIN 7
 #define LED_DATE_LATCH_PIN 8
 #define LED_TEMP_LATCH_PIN 9
 
+#define BLINK_PIN 13
 
 CRGB leds[NUM_LEDS];
 byte ledData[4];
@@ -90,23 +91,32 @@ volatile int curSec = 0;
 volatile unsigned long curMillis = 0;
 
 int lastDisplayAtSec = -1;
+bool updateTime = false;
+
+// max time without dcf sync
+#define VALID_DCF_SYNC_TIME_LAPSE 60*24
+int minutesSinceLastTimeUpdate = VALID_DCF_SYNC_TIME_LAPSE;
 
 // === SETUP =========================================================================================================================
 void setup() {
+  pinMode(LDR_PIN, INPUT);
+  pinMode(T_SENSOR_PIN, INPUT);
+
+  pinMode(BLINK_PIN, OUTPUT);
+  pinMode(RING_DATA_PIN, OUTPUT);
+  pinMode(LED_CLOCK_PIN, OUTPUT);
+  pinMode(LED_OUT_PIN, OUTPUT);
+  pinMode(LED_TEMP_LATCH_PIN, OUTPUT);
+  pinMode(LED_DATE_LATCH_PIN, OUTPUT);
+
   DCF.Start();
+  DCF.setSplitTime(105, 205);
   
   setSyncProvider(RTC.get);   // the function to get the time from the RTC
   
   LEDS.addLeds<NEOPIXEL, RING_DATA_PIN, GRB>(leds, NUM_LEDS);
   LEDS.setBrightness(LED_BRIGHTNESS);
   
-  pinMode(LDR_PIN, INPUT);
-
-  pinMode(LED_CLOCK_PIN, OUTPUT);
-  pinMode(LED_OUT_PIN, OUTPUT);
-  pinMode(LED_TEMP_LATCH_PIN, OUTPUT);
-  pinMode(LED_DATE_LATCH_PIN, OUTPUT);
-
   sensors.begin();  // DS18B20 starten
   sensors.setWaitForConversion(false);
   
@@ -273,24 +283,44 @@ int readBrightness() {
 // === LOOP =========================================================================================================================
 void loop() {
   time_t DCFtime = DCF.getTime(); // Check if new DCF77 time is available
-  if (DCFtime!=0)
-  {
+  if (DCFtime!=0) {
+    RTC.set(DCFtime);
     setTime(DCFtime);
+    updateTime = true;
   }     
+  
+  if (DCF.isPulse()) {
+    digitalWrite(BLINK_PIN, HIGH);
+  } else {
+    digitalWrite(BLINK_PIN, LOW);
+  }
   
   curHour = hour();
   curMin = minute();
   curSec = second();
   curMillis = millis();
 
-  if (curSec != lastDisplayAtSec && ((curSec % 1) == 0)) {
+  if (curSec != lastDisplayAtSec) {
     lastDisplayAtSec = curSec;
     
-    prepareTemperatureDisplay();
-    displayTemperature();
+    if (curSec == 3) {
+      if (updateTime) {
+        minutesSinceLastTimeUpdate = 0;
+      } else {
+        ++minutesSinceLastTimeUpdate; 
+      }
+      updateTime = false;
+    }
     
-    prepareDateDisplay();
-    displayDate();
+    if (curSec % 20 == 0) {
+      prepareTemperatureDisplay();
+      displayTemperature();
+    }
+    
+    if (curSec % 30 == 0) {
+      prepareDateDisplay();
+      displayDate();
+    }
   }
 }
 
@@ -336,6 +366,11 @@ void prepareTemperatureDisplay() {
     ledData[1] = digit[data % 100 % 10];
   }
   ledData[0] = DIGIT_GRAD;
+
+  // show dcf sync marker, but only if last sync happens in last VALID_DCF_SYNC_TIME_LAPSE minutes
+  if (minutesSinceLastTimeUpdate < VALID_DCF_SYNC_TIME_LAPSE) {
+    ledData[0] &= DIGIT_DOT;
+  }
 
   sensors.requestTemperatures();                 // request next measurement
 }
