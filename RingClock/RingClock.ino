@@ -83,7 +83,7 @@ typedef struct {
 ColorProfile cfg;
 
 int isr_lastSec = -1;
-unsigned long isr_milliSecOffset = 0;
+unsigned long isr_millisOffset = 0;
 
 volatile int curHour = 0;
 volatile int curMin = 0;
@@ -131,13 +131,13 @@ void setup() {
   ledData[2] = DIGIT_MINUS & DIGIT_DOT;
   ledData[1] = DIGIT_MINUS;
   ledData[0] = DIGIT_MINUS & DIGIT_DOT;
-  displayDate();
+  displayDigits(LED_DATE_LATCH_PIN);
 
   ledData[3] = DIGIT_MINUS;
   ledData[2] = DIGIT_MINUS;
   ledData[1] = DIGIT_MINUS;
   ledData[0] = DIGIT_GRAD;
-  displayTemperature();
+  displayDigits(LED_TEMP_LATCH_PIN);
 }
 
 void testLEDStrip() {
@@ -179,11 +179,11 @@ void initColorProfile() {
 void ISR_displayClock(void) {
   int isr_curMSec = 0;
   
-  if (curSec > isr_lastSec || (curSec == 0 && isr_lastSec == 59)) {
-    isr_lastSec = curSec;
-    isr_milliSecOffset = curMillis;
+  if (curSec == isr_lastSec) {
+    isr_curMSec = curMillis - isr_millisOffset;
   } else {
-    isr_curMSec = curMillis - isr_milliSecOffset;
+    isr_lastSec = curSec;
+    isr_millisOffset = curMillis;
   }
 
   // display clock
@@ -257,6 +257,7 @@ void setMinLeds(int ledM) {
 }
 
 void setSecLeds(int ledS, int msec) {
+  msec = (msec > 1024) ? 1024 :  msec;
   int prop = (msec / 4);
   int iprop = 255 - prop;
 
@@ -314,12 +315,12 @@ void loop() {
     
     if (curSec % 20 == 0) {
       prepareTemperatureDisplay();
-      displayTemperature();
+      displayDigits(LED_TEMP_LATCH_PIN);
     }
     
     if (curSec % 30 == 0) {
       prepareDateDisplay();
-      displayDate();
+      displayDigits(LED_DATE_LATCH_PIN);
     }
   }
 }
@@ -332,15 +333,6 @@ void prepareDateDisplay() {
   data = month();
   ledData[1] = digit[data / 10];
   ledData[0] = digit[data % 10] & DIGIT_DOT;
-}
-
-void displayDate() {
-  digitalWrite(LED_DATE_LATCH_PIN, 0);
-  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[3]); 
-  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[2]); 
-  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[1]); 
-  shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[0]); 
-  digitalWrite(LED_DATE_LATCH_PIN, 1);
 }
 
 void prepareTemperatureDisplay() {
@@ -375,13 +367,13 @@ void prepareTemperatureDisplay() {
   sensors.requestTemperatures();                 // request next measurement
 }
 
-void displayTemperature() {
-  digitalWrite(LED_TEMP_LATCH_PIN, 0);
+void displayDigits(int latchPin) {
+  digitalWrite(latchPin, 0);
   shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[3]); 
   shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[2]); 
   shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[1]); 
   shiftOut(LED_OUT_PIN, LED_CLOCK_PIN, MSBFIRST, ledData[0]); 
-  digitalWrite(LED_TEMP_LATCH_PIN, 1);
+  digitalWrite(latchPin, 1);
 }
 
 
