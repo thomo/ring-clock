@@ -121,8 +121,7 @@ void setup() {
   testLEDStrip(CRGB::Blue);
   testLEDStrip(CRGB::White);
   
-  testDigits(LED_DATE_LATCH_PIN);
-  testDigits(LED_TEMP_LATCH_PIN);
+  testDigits();
   
   sensors.begin();  // DS18B20 starten
   sensors.requestTemperatures();
@@ -130,7 +129,7 @@ void setup() {
 
   setTime(RTC.get());
   setSyncProvider(RTC.get);   // the function to get the time from the RTC
-  setSyncInterval(5);
+  setSyncInterval(1);
   
   prepareDateDisplay();
   displayDigits(LED_DATE_LATCH_PIN);
@@ -157,42 +156,34 @@ void testLEDStrip(CRGB c) {
   LEDS.setBrightness(LED_BRIGHTNESS); // reset brightness
 }
 
-void testDigits(int latchPin) {
+void testDigits() {
+    testDigits(B11111110);
+    delay(100);
+    testDigits(B11111101);
+    delay(100);
+    testDigits(B10111111);
+    delay(100);
+    testDigits(B11101111);
+    delay(100);
+    testDigits(B11110111);
+    delay(100);
+    testDigits(B11111011);
+    delay(100);
+    testDigits(B10111111);
+    delay(100);
+    testDigits(B11011111);
+    delay(100);
+    testDigits(B01111111);
+    delay(100);
+    testDigits(DIGIT_EMPTY);
+}
+
+void testDigits(int value) {
   for(int i = 0; i < 4; ++i) {
-    ledData[i] = DIGIT_EMPTY;
+    ledData[i] = value;
   }
-  
-  for(int i = 0; i < 4; ++i) {
-    ledData[i] = B11111110;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B11111101;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B10111111;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B11101111;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B11110111;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B11111011;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B10111111;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B11011111;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = B01111111;
-    displayDigits(latchPin);
-    delay(50);
-    ledData[i] = DIGIT_EMPTY;
-    displayDigits(latchPin);
-  }
+  displayDigits(LED_DATE_LATCH_PIN);
+  displayDigits(LED_TEMP_LATCH_PIN);
 }
 
 void initColorProfile() {
