@@ -112,47 +112,87 @@ void setup() {
   DCF.Start();
   DCF.setSplitTime(105, 205);
   
-  setSyncProvider(RTC.get);   // the function to get the time from the RTC
-  
   LEDS.addLeds<NEOPIXEL, RING_DATA_PIN, GRB>(leds, NUM_LEDS);
   LEDS.setBrightness(LED_BRIGHTNESS);
-  
-  sensors.begin();  // DS18B20 starten
-  sensors.setWaitForConversion(false);
-  
-  testLEDStrip();
-  
   initColorProfile();
   
-  Timer1.initialize(10 * 1000); // run every 0.01 sec
-  Timer1.attachInterrupt(ISR_displayClock); 
+  testLEDStrip(CRGB::Red);
+  testLEDStrip(CRGB::Green);
+  testLEDStrip(CRGB::Blue);
+  testLEDStrip(CRGB::White);
+  
+  testDigits(LED_DATE_LATCH_PIN);
+  testDigits(LED_TEMP_LATCH_PIN);
+  
+  sensors.begin();  // DS18B20 starten
+  sensors.requestTemperatures();
+  sensors.setWaitForConversion(false);
 
-  ledData[3] = DIGIT_MINUS;
-  ledData[2] = DIGIT_MINUS & DIGIT_DOT;
-  ledData[1] = DIGIT_MINUS;
-  ledData[0] = DIGIT_MINUS & DIGIT_DOT;
+  setTime(RTC.get());
+  setSyncProvider(RTC.get);   // the function to get the time from the RTC
+  setSyncInterval(5);
+  
+  prepareDateDisplay();
   displayDigits(LED_DATE_LATCH_PIN);
 
-  ledData[3] = DIGIT_MINUS;
-  ledData[2] = DIGIT_MINUS;
-  ledData[1] = DIGIT_MINUS;
-  ledData[0] = DIGIT_GRAD;
+  prepareTemperatureDisplay();
   displayDigits(LED_TEMP_LATCH_PIN);
+
+  Timer1.initialize(10 * 1000); // run every 0.01 sec
+  Timer1.attachInterrupt(ISR_displayClock); 
 }
 
-void testLEDStrip() {
+void testLEDStrip(CRGB c) {
   LEDS.setBrightness(100);
   for(int j = 0; j < 1; ++j) {
     for(int idx = 0; idx < NUM_LEDS; ++idx)
     {
-      leds[idx] = CRGB::White;
+      leds[idx] = c;
       LEDS.show();
-      delay(10);
+      delay(20);
       leds[idx] = CRGB::Black;
     }
     LEDS.show();
   }
   LEDS.setBrightness(LED_BRIGHTNESS); // reset brightness
+}
+
+void testDigits(int latchPin) {
+  for(int i = 0; i < 4; ++i) {
+    ledData[i] = DIGIT_EMPTY;
+  }
+  
+  for(int i = 0; i < 4; ++i) {
+    ledData[i] = B11111110;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B11111101;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B10111111;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B11101111;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B11110111;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B11111011;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B10111111;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B11011111;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = B01111111;
+    displayDigits(latchPin);
+    delay(50);
+    ledData[i] = DIGIT_EMPTY;
+    displayDigits(latchPin);
+  }
 }
 
 void initColorProfile() {
