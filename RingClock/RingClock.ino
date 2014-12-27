@@ -10,9 +10,6 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-// Timer Interrupt
-#include <TimerOne.h>
-
 // read atomic time broadcast
 #include <DCF77.h>
 
@@ -44,8 +41,7 @@ CRGB leds[NUM_LEDS];
 byte ledData[4];
 
 int ldrIdx = 0;
-int ldrValue[4] = {512,512,512,512};
-
+int ldrValue[4] = {0,0,0,0};
 
 byte digit[10] = {
   B11000000, // 0
@@ -65,6 +61,10 @@ byte digit[10] = {
 #define DIGIT_DOT    B01111111
 #define DIGIT_MINUS  B10111111
 #define DIGIT_GRAD   B10011100
+#define DIGIT_r      B10101111
+#define DIGIT_t      B10000111
+#define DIGIT_c      B10100111
+#define DIGIT_E      B10000110
 
 OneWire oneWire(T_SENSOR_PIN);
 DallasTemperature sensors(&oneWire);
@@ -82,15 +82,15 @@ typedef struct {
 
 ColorProfile cfg;
 
-int isr_lastSec = -1;
-unsigned long isr_millisOffset = 0;
+int lastSec = -1;
+unsigned long millisOffset = 0;
 
-volatile int curHour = 0;
-volatile int curMin = 0;
-volatile int curSec = 0;
-volatile unsigned long curMillis = 0;
+int curHour = 0;
+int curMin = 0;
+int curSec = 0;
+unsigned long curMillis = 0;
 
-int lastDisplayAtSec = -1;
+int lastDigitUpdate = -1;
 bool updateTime = false;
 
 // max time without dcf sync
@@ -109,6 +109,8 @@ void setup() {
   pinMode(LED_TEMP_LATCH_PIN, OUTPUT);
   pinMode(LED_DATE_LATCH_PIN, OUTPUT);
 
+  testDigits(DIGIT_EMPTY);
+  
   DCF.Start();
   DCF.setSplitTime(105, 205);
   
@@ -127,18 +129,17 @@ void setup() {
   sensors.requestTemperatures();
   sensors.setWaitForConversion(false);
 
+  checkRTC();
+  
   setTime(RTC.get());
   setSyncProvider(RTC.get);   // the function to get the time from the RTC
-  setSyncInterval(1);
+  setSyncInterval(10);
   
   prepareDateDisplay();
   displayDigits(LED_DATE_LATCH_PIN);
 
   prepareTemperatureDisplay();
   displayDigits(LED_TEMP_LATCH_PIN);
-
-  Timer1.initialize(10 * 1000); // run every 0.01 sec
-  Timer1.attachInterrupt(ISR_displayClock); 
 }
 
 void testLEDStrip(CRGB c) {
@@ -148,7 +149,7 @@ void testLEDStrip(CRGB c) {
     {
       leds[idx] = c;
       LEDS.show();
-      delay(20);
+      delay(15);
       leds[idx] = CRGB::Black;
     }
     LEDS.show();
@@ -157,24 +158,25 @@ void testLEDStrip(CRGB c) {
 }
 
 void testDigits() {
+    int d = 200;
     testDigits(B11111110);
-    delay(100);
+    delay(d);
     testDigits(B11111101);
-    delay(100);
+    delay(d);
     testDigits(B10111111);
-    delay(100);
+    delay(d);
     testDigits(B11101111);
-    delay(100);
+    delay(d);
     testDigits(B11110111);
-    delay(100);
+    delay(d);
     testDigits(B11111011);
-    delay(100);
+    delay(d);
     testDigits(B10111111);
-    delay(100);
+    delay(d);
     testDigits(B11011111);
-    delay(100);
+    delay(d);
     testDigits(B01111111);
-    delay(100);
+    delay(d);
     testDigits(DIGIT_EMPTY);
 }
 
@@ -206,18 +208,112 @@ void initColorProfile() {
   cfg.sec  = CRGB::Red;
 }
 
-// === ISR ======================================================================================================================
-void ISR_displayClock(void) {
-  int isr_curMSec = 0;
+void checkRTC() {
+  tmElements_t tm;
+  int cnt = 0;
+  bool isReady = false;
   
-  if (curSec == isr_lastSec) {
-    isr_curMSec = curMillis - isr_millisOffset;
+  while(!isReady) {
+    if (RTC.read(tm)) {
+      isReady = true;
+    } else {
+      if (RTC.chipPresent()) {
+        tm.Second = 0;
+        tm.Minute = 0;
+        tm.Hour = 0;
+        tm.Wday = 5;
+        tm.Day = 1;
+        tm.Month = 1;
+        tm.Year = 2015;
+        RTC.write(tm);
+      } else {
+        ledData[3] = DIGIT_r;
+        ledData[2] = DIGIT_t;
+        ledData[1] = DIGIT_c;
+        ledData[0] = DIGIT_EMPTY;
+        displayDigits(LED_DATE_LATCH_PIN);
+        ledData[3] = DIGIT_E;
+        ledData[2] = DIGIT_r;
+        ledData[1] = DIGIT_r;
+        ledData[0] = DIGIT_EMPTY;
+        displayDigits(LED_TEMP_LATCH_PIN);
+        
+        ++cnt;
+        cnt %= NUM_LEDS;
+        
+        for(int i = 0; i < NUM_LEDS; ++i) {
+          leds[i] = (i == cnt) ? CRGB::Red : CRGB::Black;
+        }
+        LEDS.show();
+      }
+      delay(1000);
+    }
+  }
+}
+
+// === LOOP =========================================================================================================================
+void loop() {
+  time_t DCFtime = DCF.getTime(); // Check if new DCF77 time is available
+  if (DCFtime!=0) {
+    RTC.set(DCFtime);
+    setTime(DCFtime);
+    updateTime = true;
+  }     
+  
+  if (DCF.isPulse()) {
+    digitalWrite(BLINK_PIN, HIGH);
   } else {
-    isr_lastSec = curSec;
-    isr_millisOffset = curMillis;
+    digitalWrite(BLINK_PIN, LOW);
+  }
+  
+  curHour = hour();
+  curMin = minute();
+  curSec = second();
+  curMillis = millis();
+  
+  displayClock();
+
+  readBrightness();    
+
+  if (curSec != lastDigitUpdate) {
+    lastDigitUpdate = curSec;
+
+    if (curSec == 0) {
+      if (updateTime) {
+        minutesSinceLastTimeUpdate = 0;
+      } else {
+        ++minutesSinceLastTimeUpdate; 
+      }
+      updateTime = false;
+    }
+    
+    if (curSec % 10 == 0) {
+      prepareTemperatureDisplay();
+      displayDigits(LED_TEMP_LATCH_PIN);
+    }
+    
+    if (curSec % 30 == 0) {
+      prepareDateDisplay();
+      displayDigits(LED_DATE_LATCH_PIN);
+    }
+  }
+  
+  delay(50);
+}
+
+// === CLOCK DISPLAY =========================================================================================================================
+
+void displayClock(void) {
+  int curMSec = 0;
+  
+  if (curSec == lastSec) {
+    curMSec = curMillis - millisOffset;
+  } else {
+    lastSec = curSec;
+    millisOffset = curMillis;
   }
 
-  // display clock
+  // display clock layout
   
   // 1. set background
   for(int i = 0; i < NUM_LEDS; ++i) {
@@ -237,9 +333,9 @@ void ISR_displayClock(void) {
   
   setHourLeds(ledH);
   setMinLeds(curMin);  
-  setSecLeds(curSec, isr_curMSec);
+  setSecLeds(curSec, curMSec);
   
-  LEDS.setBrightness(readBrightness());
+  LEDS.setBrightness(calcBrightness());
   LEDS.show();
 }
 
@@ -292,8 +388,8 @@ void setSecLeds(int ledS, int msec) {
   int prop = (msec / 4);
   int iprop = 255 - prop;
 
-  setSecLed((ledS == 0) ? NUM_LEDS - 1 : ledS - 1, prop, iprop);
-  setSecLed(ledS, iprop, prop);
+  setSecLed(ledS, prop, iprop);
+  setSecLed((ledS == NUM_LEDS - 1) ? 0 : ledS + 1, iprop, prop);
 }
 
 void setSecLed(int idx, int prop, int iprop) {
@@ -301,60 +397,18 @@ void setSecLed(int idx, int prop, int iprop) {
   leds[idx] = tmp.fadeLightBy(prop) + leds[idx].fadeToBlackBy(iprop);
 }
 
-int readBrightness() {
+void readBrightness() {
   ldrValue[ldrIdx] = abs(analogRead(LDR_PIN) - 1024) + 15;
   if (ldrValue[ldrIdx] > 512) ldrValue[ldrIdx] = 512;
-  
   ldrIdx = (ldrIdx == 3) ? 0 : ldrIdx + 1;
-  
+}
+
+int calcBrightness() {  
   int sensorValue = (ldrValue[0] + ldrValue[1] + ldrValue[2] + ldrValue[3]) / 4; // average value 
-  
   return sensorValue / 2; // adjust range 0..512 -> 0..256
 }
 
-// === LOOP =========================================================================================================================
-void loop() {
-  time_t DCFtime = DCF.getTime(); // Check if new DCF77 time is available
-  if (DCFtime!=0) {
-    RTC.set(DCFtime);
-    setTime(DCFtime);
-    updateTime = true;
-  }     
-  
-  if (DCF.isPulse()) {
-    digitalWrite(BLINK_PIN, HIGH);
-  } else {
-    digitalWrite(BLINK_PIN, LOW);
-  }
-  
-  curHour = hour();
-  curMin = minute();
-  curSec = second();
-  curMillis = millis();
-
-  if (curSec != lastDisplayAtSec) {
-    lastDisplayAtSec = curSec;
-    
-    if (curSec == 3) {
-      if (updateTime) {
-        minutesSinceLastTimeUpdate = 0;
-      } else {
-        ++minutesSinceLastTimeUpdate; 
-      }
-      updateTime = false;
-    }
-    
-    if (curSec % 20 == 0) {
-      prepareTemperatureDisplay();
-      displayDigits(LED_TEMP_LATCH_PIN);
-    }
-    
-    if (curSec % 30 == 0) {
-      prepareDateDisplay();
-      displayDigits(LED_DATE_LATCH_PIN);
-    }
-  }
-}
+// === DATE + TEMPERATURE =============================================================================================================
 
 void prepareDateDisplay() {
   byte data = day();
