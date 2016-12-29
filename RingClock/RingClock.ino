@@ -1,6 +1,6 @@
 // LED Ring
 #include <FastLED.h> 
-#include <Time.h>  
+#include <TimeLib.h>  
 
 // RTC
 #include <Wire.h>  
@@ -65,6 +65,9 @@ byte digit[10] = {
 #define DIGIT_t      B10000111
 #define DIGIT_c      B10100111
 #define DIGIT_E      B10000110
+#define DIGIT_S      B10010010
+#define DIGIT_o      B10100011
+#define DIGIT_P      B10001100
 
 OneWire oneWire(T_SENSOR_PIN);
 DallasTemperature sensors(&oneWire);
@@ -90,7 +93,7 @@ int curMin = 0;
 int curSec = 0;
 unsigned long curMillis = 0;
 
-int lastDigitUpdate = -1;
+int lastUpdateAtSecond = -1;
 bool updateTime = false;
 
 // max time without dcf sync
@@ -112,10 +115,10 @@ void setup() {
   testDigits(DIGIT_EMPTY);
   
   DCF.Start();
-  DCF.setSplitTime(105, 205);
+  DCF.setSplitTime(110, 220);
   
-  LEDS.addLeds<NEOPIXEL, RING_DATA_PIN, GRB>(leds, NUM_LEDS);
-  LEDS.setBrightness(LED_BRIGHTNESS);
+  FastLED.addLeds<NEOPIXEL, RING_DATA_PIN>(leds, NUM_LEDS);
+  FastLED.setBrightness(LED_BRIGHTNESS);
   initColorProfile();
   
   testLEDStrip(CRGB::Red);
@@ -133,7 +136,7 @@ void setup() {
   
   setTime(RTC.get());
   setSyncProvider(RTC.get);   // the function to get the time from the RTC
-  setSyncInterval(10);
+  setSyncInterval(13);        // sync after xxx sec
   
   prepareDateDisplay();
   displayDigits(LED_DATE_LATCH_PIN);
@@ -143,18 +146,18 @@ void setup() {
 }
 
 void testLEDStrip(CRGB c) {
-  LEDS.setBrightness(100);
+  FastLED.setBrightness(100);
   for(int j = 0; j < 1; ++j) {
     for(int idx = 0; idx < NUM_LEDS; ++idx)
     {
       leds[idx] = c;
-      LEDS.show();
+      FastLED.show();
       delay(15);
       leds[idx] = CRGB::Black;
     }
-    LEDS.show();
+    FastLED.show();
   }
-  LEDS.setBrightness(LED_BRIGHTNESS); // reset brightness
+  FastLED.setBrightness(LED_BRIGHTNESS); // reset brightness
 }
 
 void testDigits() {
@@ -217,21 +220,27 @@ void checkRTC() {
     if (RTC.read(tm)) {
       isReady = true;
     } else {
+      ledData[3] = DIGIT_r;
+      ledData[2] = DIGIT_t;
+      ledData[1] = DIGIT_c;
+      ledData[0] = DIGIT_EMPTY;
+      displayDigits(LED_DATE_LATCH_PIN);
+
       if (RTC.chipPresent()) {
+        ledData[3] = DIGIT_S;
+        ledData[2] = DIGIT_t;
+        ledData[1] = DIGIT_o;
+        ledData[0] = DIGIT_P;
+        displayDigits(LED_TEMP_LATCH_PIN);
         tm.Second = 0;
         tm.Minute = 0;
         tm.Hour = 0;
         tm.Wday = 5;
         tm.Day = 1;
         tm.Month = 1;
-        tm.Year = 2015;
+        tm.Year = 2017-1970;
         RTC.write(tm);
       } else {
-        ledData[3] = DIGIT_r;
-        ledData[2] = DIGIT_t;
-        ledData[1] = DIGIT_c;
-        ledData[0] = DIGIT_EMPTY;
-        displayDigits(LED_DATE_LATCH_PIN);
         ledData[3] = DIGIT_E;
         ledData[2] = DIGIT_r;
         ledData[1] = DIGIT_r;
@@ -260,7 +269,7 @@ void loop() {
     updateTime = true;
   }     
   
-  if (DCF.isPulse()) {
+  if (digitalRead(DCF_PIN)) {
     digitalWrite(BLINK_PIN, HIGH);
   } else {
     digitalWrite(BLINK_PIN, LOW);
@@ -272,11 +281,11 @@ void loop() {
   curMillis = millis();
   
   displayClock();
-
   readBrightness();    
 
-  if (curSec != lastDigitUpdate) {
-    lastDigitUpdate = curSec;
+  // only do it one time in each second
+  if (curSec != lastUpdateAtSecond) {
+    lastUpdateAtSecond = curSec;
 
     if (curSec == 0) {
       if (updateTime) {
@@ -302,6 +311,9 @@ void loop() {
 }
 
 // === CLOCK DISPLAY =========================================================================================================================
+int nextLedIdx(int idx) {
+  return idx == (NUM_LEDS - 1) ? 0 : idx + 1;
+}
 
 void displayClock(void) {
   int curMSec = 0;
@@ -328,58 +340,54 @@ void displayClock(void) {
     }
   }  
   
-  int ledH = curHour * 5 + (curMin / 12); 
-  ledH = ledH > 55 ? ledH - 60 : ledH;
-  
-  setHourLeds(ledH);
-  setMinLeds(curMin);  
+  setHourLeds(curHour, curMin);
+  setMinLeds(curMin, curSec);  
   setSecLeds(curSec, curMSec);
   
   LEDS.setBrightness(calcBrightness());
   LEDS.show();
 }
 
-void setHourLeds(int ledH) {
+void setHourLeds(int curHour, int curMin) {
+  int ledH = curHour * 5 + (curMin / 12); 
+  ledH = ledH > 55 ? ledH - 60 : ledH;
+
   int idx = ledH - 2;
   if (idx < 0) idx += NUM_LEDS;
   
   leds[idx] = cfg.hour[2];
   
-  ++idx;
-  idx = idx == NUM_LEDS ? idx = 0 : idx;
-
+  idx = nextLedIdx(idx);
   leds[idx] = cfg.hour[1];
 
-  ++idx;
-  idx = idx == NUM_LEDS ? idx = 0 : idx;
-
+  idx = nextLedIdx(idx);
   leds[idx] = cfg.hour[0];
 
-  ++idx;
-  idx = idx == NUM_LEDS ? idx = 0 : idx;
-
+  idx = nextLedIdx(idx);
   leds[idx] = cfg.hour[1];
 
-  ++idx;
-  idx = idx == NUM_LEDS ? idx = 0 : idx;
-  
+  idx = nextLedIdx(idx);
   leds[idx] = cfg.hour[2];
 }
 
-void setMinLeds(int ledM) {
-  int idx = ledM - 1;
+void setMinLeds(int curMin, int curSec) {
+  // 00..30    50 100 50
+  // 31..59    50 100 100 50
+
+  int idx = curMin - 1;
   if (idx < 0) idx += NUM_LEDS;
-  
+
   leds[idx] = cfg.min[1] + leds[idx].fadeToBlackBy(180);
   
-  ++idx;
-  idx = idx == NUM_LEDS ? idx = 0 : idx;
-
+  idx = nextLedIdx(idx);
   leds[idx] = cfg.min[0] + leds[idx].fadeToBlackBy(220);
-
-  ++idx;
-  idx = idx == NUM_LEDS ? idx = 0 : idx;
-
+  
+  if (curSec > 30) {
+    idx = nextLedIdx(idx);
+    leds[idx] = cfg.min[0] + leds[idx].fadeToBlackBy(220);
+  }
+  
+  idx = nextLedIdx(idx);
   leds[idx] = cfg.min[1] + leds[idx].fadeToBlackBy(180);
 }
 
